@@ -32,7 +32,7 @@ with st.sidebar:
     groq_api_key = st.text_input("Groq API Key", type="password", value=os.getenv("GROQ_API_KEY", ""))
     selected_model = st.selectbox(
         "Inference Model", 
-        ["llama-3.1-8b-instant", "llama-3.1-70b-versatile"]
+        ["openai/gpt-oss-120b", "meta-llama/llama-prompt-guard-2-22m"]
     )
     
     st.divider()
