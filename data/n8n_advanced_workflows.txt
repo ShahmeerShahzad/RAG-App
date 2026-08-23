@@ -1,0 +1,20 @@
+================================================================================
+N8N ERROR RECOVERY, SUB-WORKFLOWS & AI ORCHESTRATION
+================================================================================
+
+1. ERROR HANDLING DIRECTIVES & ERROR TRIGGERS:
+- Node-Level Directives:
+  * 'Continue on Fail': Appends an `error` key to the item JSON without halting the workflow, enabling downstream IF/Switch nodes to route failures.
+  * 'Retry on Fail': Automatically executes retries using configurable exponential backoff intervals (1 to 5 attempts).
+- Global Error Workflows: Attached via Workflow Settings. Any unhandled exception halts the parent execution and triggers the Error Workflow, passing `execution.id`, `workflow.id`, and `node.name` to send alerts to Slack, Discord, or Email.
+
+2. SUB-WORKFLOW MODULARIZATION:
+- Execute Workflow Node: Triggers a dedicated child workflow, passing the current execution payload into the child workflow's Start/Trigger node.
+- Execution Modes:
+  * Inline (Blocking): Parent workflow waits for child execution to return its final dataset before proceeding.
+  * Asynchronous: Fires the child workflow execution in a detached background queue without blocking parent execution.
+
+3. ADVANCED AI & LANGCHAIN NODES IN N8N:
+- AI Agent Node: Serves as the cognitive orchestrator. Connects to Chat Models (Groq, OpenAI, Anthropic), Memory buffers, Vector Store Retrievers, and custom tool nodes.
+- Conversational Memory: Connecting 'Window Buffer Memory' with a dynamic `sessionId` (e.g., `{{ $json.chatId }}`) enables multi-turn conversation tracking across workflow runs.
+- Structured Output Parser: Enforces JSON schema definitions on LLM responses before passing data to databases like Postgres or Google Sheets.

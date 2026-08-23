@@ -1,0 +1,27 @@
+================================================================================
+N8N CORE ARCHITECTURE, DATA STRUCTURES & EXECUTION PIPELINE
+================================================================================
+
+1. DATA ENGINE & PAIRED ITEM LINKING:
+- JSON Array Structure: n8n processes incoming data as an array of JSON objects: `[ { "json": { ... } }, { "json": { ... } } ]`.
+- Sequential vs Batch Processing: Each item in the array is evaluated sequentially through downstream nodes unless a node natively supports batch operations or is explicitly set to 'Run Once for All Items'.
+- Paired Item Context: n8n maintains an internal metadata link called `pairedItem` connecting every transformed output record back to its exact origin record in preceding nodes.
+- Referencing Preceding Nodes: Syntax `$('Node Name').item.json.field` uses paired item linking to resolve parent attributes corresponding to the current item's execution branch rather than defaulting to index 0.
+
+2. WEBHOOK TRIGGERS & RESPONSE BEHAVIORS:
+- Test URLs (`/webhook-test/...`): Active only during manual development when 'Listen for test event' is active. Provides verbose execution debug frames.
+- Production URLs (`/webhook/...`): Runs continuously in the background when the workflow toggle is set to Active.
+- Response Modes:
+  * 'On Received': Immediately returns HTTP 200 OK before running downstream nodes (ideal for asynchronous webhooks).
+  * 'When Last Node Finishes': Holds HTTP connection open until the final downstream node finishes, returning that node's output payload.
+  * 'Using Respond to Webhook Node': Allows mid-workflow conditional HTTP response codes (e.g., returning HTTP 400 on schema invalidation or HTTP 202 for queued tasks).
+
+3. EXPRESSIONS & CODE NODE EVALUATION:
+- Expressions Syntax: Expressions use template literals `{{ ... }}`.
+  * Current node data: `{{ $json.fieldName }}`
+  * Preceding node item: `{{ $('HTTP Request').item.json.userId }}`
+  * Array mapping across all items: `{{ $('Postgres').all().map(i => i.json.id) }}`
+  * Metadata variables: `{{ $execution.id }}`, `{{ $workflow.id }}`, `{{ $now.toISO() }}`
+- Code Node Modes:
+  * 'Run Once for Each Item': Iterates over items independently.
+  * 'Run Once for All Items': Provides direct access to the entire `items` array for aggregation, sorting, deduplication, and bulk operations.

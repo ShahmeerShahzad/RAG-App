@@ -9,39 +9,47 @@ from ragas.metrics import faithfulness, answer_relevance, context_precision
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 
-eval_data_dict = {
+# 1. Golden Evaluation Dataset for n8n Knowledge Base
+test_dataset = {
     "question": [
-        "What RAM slots should I use for 2 DDR5 sticks on the motherboard?",
-        "What does a solid yellow Q-LED light mean during POST?"
+        "How does pairedItem linking work in n8n?",
+        "What is the difference between Test and Production Webhook URLs in n8n?",
+        "How do you attach and use a Global Error Workflow?"
     ],
     "contexts": [
-        ["Optimal 2-stick RAM configuration: Populate slots DIMM_A2 (slot 2) and DIMM_B2 (slot 4) first on ASUS X670E Hero."],
-        ["DRAM LED (Yellow/Orange): Memory training failure, incompatible RAM, unseated sticks, or invalid slot order."]
+        ["Paired Item Context: n8n maintains an internal metadata link called pairedItem connecting every transformed output record back to its exact origin record in preceding nodes. Syntax $('Node Name').item.json.field uses paired item linking to resolve parent attributes."],
+        ["Test URLs listen only during manual development when 'Listen for test event' is active and provide verbose debug data. Production URLs run continuously in the background when the workflow toggle is set to Active."],
+        ["Global Error Workflows: Attached via Workflow Settings. Any unhandled exception halts the parent execution and triggers the Error Workflow, passing execution.id, workflow.id, and node.name to send alerts."]
     ],
     "answer": [
-        "For a 2-stick configuration on the ASUS X670E Hero, populate slots DIMM_A2 (slot 2) and DIMM_B2 (slot 4) first.",
-        "A solid yellow Q-LED indicates a DRAM memory training failure, unseated sticks, or incompatible RAM."
+        "PairedItem linking maintains an internal metadata pointer mapping transformed output items back to their origin record in preceding nodes.",
+        "Test webhook URLs only listen during active canvas testing and return debug data, while production URLs run continuously 24/7 when the workflow is activated.",
+        "You attach an Error Workflow in Workflow Settings; it receives the execution ID, workflow ID, and offending node name to automate alerting when an error occurs."
     ],
     "ground_truth": [
-        "Populate slots DIMM_A2 and DIMM_B2 first.",
-        "A yellow DRAM LED indicates a memory initialization error or bad RAM."
+        "pairedItem maps transformed records back to their exact origin record in preceding nodes.",
+        "Test URLs work only during active canvas listening, while production URLs listen continuously when active.",
+        "Attached in Workflow Settings to receive execution metadata when an unhandled error occurs."
     ]
 }
 
-eval_dataset = Dataset.from_dict(eval_data_dict)
-
-# 2. Evaluation Engines
-eval_llm = ChatGroq(model="openai/gpt-oss-120b", temperature=0.0)
+eval_data = Dataset.from_dict(test_dataset)
+eval_llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.0)
 eval_embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-print("Executing automated Ragas evaluation suite...")
+print("Executing automated Ragas benchmark across 3 core metrics...")
 results = evaluate(
-    dataset=eval_dataset,
+    dataset=eval_data,
     metrics=[faithfulness, answer_relevance, context_precision],
     llm=eval_llm,
     embeddings=eval_embeddings
 )
 
-# 3. Output Report
-print("\n================== RAGAS EVALUATION METRICS REPORT ==================")
-print(results.to_pandas()[["question", "faithfulness", "answer_relevance", "context_precision"]])
+print("\n" + "=" * 65)
+print("             RAGAS EVALUATION METRIC REPORT")
+print("=" * 65)
+df = results.to_pandas()
+print(df[["question", "faithfulness", "answer_relevance", "context_precision"]].to_string(index=False))
+
+df.to_csv("rag_evaluation_results.csv", index=False)
+print("\n✅ Results exported to 'rag_evaluation_results.csv'")
