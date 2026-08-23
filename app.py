@@ -174,7 +174,7 @@ with st.sidebar:
 
     selected_model = st.selectbox(
         "Inference Model",
-        ["meta-llama/llama-prompt-guard-2-86m", "openai/gpt-oss-120b"]
+        ["groq/compound", "openai/gpt-oss-120b"]
     )
 
     st.divider()
@@ -238,7 +238,7 @@ if query := st.chat_input("Ask an n8n architecture, expression, or execution que
 
             formatted_context = "\n\n".join(context_blocks)
 
-            # Grounding Guardrail Prompt (Topic 3)
+            # Grounding Guardrail Prompt 
             system_prompt = (
                 "You are an expert n8n workflow automation engineer. Answer the user's question "
                 "using strictly the verified documentation excerpts provided in the context below. "
@@ -253,7 +253,6 @@ if query := st.chat_input("Ask an n8n architecture, expression, or execution que
                 ("human", "{question}")
             ])
 
-            # LCEL Execution (Topic 1)
             llm = ChatGroq(model=selected_model, groq_api_key=groq_api_key, temperature=0.0)
             rag_chain = prompt | llm | StrOutputParser()
 
