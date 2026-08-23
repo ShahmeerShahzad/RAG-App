@@ -3,7 +3,7 @@ import tempfile
 import logging
 from dotenv import load_dotenv
 
-# Load environment variables before LangChain/LangSmith initializes
+# Load environment configuration
 load_dotenv()
 
 import streamlit as st
@@ -16,33 +16,18 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from flashrank import Ranker, RerankRequest
 
+DB_PATH = "./data/chroma_db_vectors"
+COLLECTION_NAME = "hardware_manuals"
+
 # -----------------------------------------------------------------------------
-# 1. STREAMLIT GUI SETUP
+# 1. SETUP & AUTOMATIC CREDENTIAL DETECTION
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="RAG APP", page_icon="⚙️", layout="wide")
 st.title("Enterprise Hardware Diagnostics RAG Assistant ⚙️")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "vector_store" not in st.session_state:
-    st.session_state.vector_store = None
+# Resolve Groq API Key automatically from Streamlit Secrets or .env
+default_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY", ""))
 
-with st.sidebar:
-    st.header("🔧 Configuration")
-    groq_api_key = st.text_input("Groq API Key", type="password", value=os.getenv("GROQ_API_KEY", ""))
-    selected_model = st.selectbox(
-        "Inference Model", 
-        ["openai/gpt-oss-120b", "meta-llama/llama-prompt-guard-2-22m"]
-    )
-    
-    st.divider()
-    st.header("📂 Knowledge Base Ingestion")
-    uploaded_files = st.file_uploader("Upload Manuals / Specs (PDF)", type=["pdf"], accept_multiple_files=True)
-    process_btn = st.button("Process & Index Documents", type="primary")
-
-# -----------------------------------------------------------------------------
-# 2. INGESTION, LOCAL EMBEDDINGS & FLASHRANK RE-RANKING
-# -----------------------------------------------------------------------------
 @st.cache_resource
 def get_embedding_model():
     return HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
@@ -51,6 +36,62 @@ def get_embedding_model():
 def get_reranker():
     return Ranker(model_name="ms-marco-TinyBERT-L-2-v2")
 
+def load_existing_vector_store():
+    """Auto-loads ChromaDB from disk if previous embeddings exist."""
+    if os.path.exists(DB_PATH):
+        embeddings = get_embedding_model()
+        store = Chroma(
+            persist_directory=DB_PATH,
+            embedding_function=embeddings,
+            collection_name=COLLECTION_NAME
+        )
+        # Check if the collection contains indexed records
+        if store._collection.count() > 0:
+            return store
+    return None
+
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = load_existing_vector_store()
+
+# -----------------------------------------------------------------------------
+# 2. SIDEBAR CONFIGURATION & OPTIONAL INGESTION
+# -----------------------------------------------------------------------------
+with st.sidebar:
+    st.header("🔧 Configuration")
+    
+    if default_api_key:
+        st.success("✅ Groq API Key detected from environment.")
+        groq_api_key = default_api_key
+    else:
+        groq_api_key = st.text_input("Groq API Key", type="password")
+
+    selected_model = st.selectbox(
+        "Inference Model", 
+        ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
+    )
+
+    st.divider()
+    st.header("📂 Knowledge Base Status")
+    
+    if st.session_state.vector_store:
+        doc_count = st.session_state.vector_store._collection.count()
+        st.info(f"🟢 Active Index: **{doc_count} chunks** in memory.")
+    else:
+        st.warning("⚪ No existing vector index found on disk.")
+
+    uploaded_files = st.file_uploader(
+        "Add / Update PDF Manuals", 
+        type=["pdf"], 
+        accept_multiple_files=True
+    )
+    process_btn = st.button("Process & Index", type="primary")
+
+# -----------------------------------------------------------------------------
+# 3. DOCUMENT INGESTION LOGIC
+# -----------------------------------------------------------------------------
 def process_and_index_pdfs(files):
     all_chunks = []
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=50)
@@ -74,18 +115,16 @@ def process_and_index_pdfs(files):
     vector_store = Chroma.from_documents(
         documents=all_chunks,
         embedding=embeddings,
-        persist_directory="./data/chroma_db_vectors",
-        collection_name="hardware_manuals"
+        persist_directory=DB_PATH,
+        collection_name=COLLECTION_NAME
     )
     return vector_store
 
 def retrieve_and_rerank(query, vector_store, top_k=8, top_n=3):
-    # Step A: Broad Vector Search (Retrieve top 8 candidates)
     initial_docs = vector_store.similarity_search(query, k=top_k)
     if not initial_docs:
         return []
 
-    # Step B: Cross-Encoder Re-Ranking with FlashRank
     passages = [
         {"id": i, "text": doc.page_content, "meta": doc.metadata}
         for i, doc in enumerate(initial_docs)
@@ -93,17 +132,15 @@ def retrieve_and_rerank(query, vector_store, top_k=8, top_n=3):
     rerank_request = RerankRequest(query=query, passages=passages)
     ranker = get_reranker()
     ranked_results = ranker.rerank(rerank_request)
-
-    # Step C: Return Top N compressed passages
     return ranked_results[:top_n]
 
 if process_btn and uploaded_files:
-    with st.spinner("Extracting text, computing embeddings, and building vector index..."):
+    with st.spinner("Indexing new documents into persistent store..."):
         st.session_state.vector_store = process_and_index_pdfs(uploaded_files)
-        st.success(f"Indexed {len(uploaded_files)} PDF file(s) into ChromaDB!")
+        st.rerun()
 
 # -----------------------------------------------------------------------------
-# 3. CHAT INTERFACE & GROUNDED INFERENCE
+# 4. CHAT INTERFACE & GENERATION
 # -----------------------------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -116,10 +153,10 @@ for msg in st.session_state.messages:
 
 if query := st.chat_input("Ask a hardware spec or diagnostic question..."):
     if not groq_api_key:
-        st.error("Please provide a valid Groq API Key in the sidebar.")
+        st.error("Please provide a valid Groq API Key.")
         st.stop()
     if not st.session_state.vector_store:
-        st.warning("Please upload and process knowledge documents in the sidebar first.")
+        st.warning("Please upload and index a document first.")
         st.stop()
 
     st.session_state.messages.append({"role": "user", "content": query})
@@ -128,13 +165,11 @@ if query := st.chat_input("Ask a hardware spec or diagnostic question..."):
 
     llm = ChatGroq(model=selected_model, groq_api_key=groq_api_key, temperature=0.0)
 
-    # Strict Grounding Prompt
     system_prompt = (
         "You are an expert PC hardware diagnostic engineer. Answer the user's question "
         "using strictly the technical manual excerpts provided in the context below. "
         "If the answer cannot be directly determined from the context, state explicitly: "
-        "'I cannot find this information in the provided documentation.' "
-        "Never extrapolate or assume technical specifications not present in the text.\n\n"
+        "'I cannot find this information in the provided documentation.'\n\n"
         "Technical Context:\n{context}"
     )
 
@@ -144,7 +179,7 @@ if query := st.chat_input("Ask a hardware spec or diagnostic question..."):
     ])
 
     with st.chat_message("assistant"):
-        with st.spinner("Searching ChromaDB & re-ranking with FlashRank..."):
+        with st.spinner("Retrieving and re-ranking relevant manual excerpts..."):
             ranked_results = retrieve_and_rerank(query, st.session_state.vector_store)
 
             context_blocks = []
